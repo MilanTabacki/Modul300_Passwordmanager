@@ -1,0 +1,134 @@
+<?php
+session_start();
+
+// Verbindung zur Datenbank herstellen (bitte die echten Zugangsdaten einfügen)
+$host = 'localhost';
+$dbname = 'password_manager';
+$username = 'root';
+$password = '';
+
+$db = mysqli_connect($host, $username, $password, $dbname);
+
+// Verbindung überprüfen
+if (!$db) {
+    die("Verbindung zur Datenbank fehlgeschlagen: " . mysqli_connect_error());
+}
+
+// Funktion zum Überprüfen, ob der Benutzer eingeloggt ist
+function isLoggedIn() {
+    return isset($_SESSION['user_id']);
+}
+
+// Funktion zum Hinzufügen eines Benutzers
+function addUser($username, $password) {
+    global $db;
+    $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
+    $stmt = mysqli_prepare($db, "INSERT INTO users (username, password) VALUES (?, ?)");
+    mysqli_stmt_bind_param($stmt, "ss", $username, $hashedPassword);
+    mysqli_stmt_execute($stmt);
+    mysqli_stmt_close($stmt);
+}
+
+// Funktion zum Überprüfen der Anmeldeinformationen
+function checkLogin($username, $password) {
+    global $db;
+    $stmt = mysqli_prepare($db, "SELECT id, username, password FROM users WHERE username = ?");
+    mysqli_stmt_bind_param($stmt, "s", $username);
+    mysqli_stmt_execute($stmt);
+    mysqli_stmt_store_result($stmt);
+    mysqli_stmt_bind_result($stmt, $user_id, $username_db, $hashedPassword);
+    mysqli_stmt_fetch($stmt);
+    if (password_verify($password, $hashedPassword)) {
+        $_SESSION['user_id'] = $user_id;
+        $_SESSION['username'] = $username_db;
+        return true;
+    }
+    return false;
+}
+
+// Funktion zum Hinzufügen eines Passworts für den Benutzer
+function addPassword($service, $password) {
+    global $db;
+    $user_id = $_SESSION['user_id'];
+    $hashedPassword = password_hash($password, PASSWORD_DEFAULT);
+    $stmt = mysqli_prepare($db, "INSERT INTO passwords (user_id, service_name, password_hash) VALUES (?, ?, ?)");
+    mysqli_stmt_bind_param($stmt, "iss", $user_id, $service, $hashedPassword);
+    mysqli_stmt_execute($stmt);
+    mysqli_stmt_close($stmt);
+}
+
+// Funktion zum Abrufen aller Passwörter für den aktuellen Benutzer
+function getPasswords() {
+    global $db;
+    $user_id = $_SESSION['user_id'];
+    $stmt = mysqli_prepare($db, "SELECT service_name FROM passwords WHERE user_id = ?");
+    mysqli_stmt_bind_param($stmt, "i", $user_id);
+    mysqli_stmt_execute($stmt);
+    mysqli_stmt_store_result($stmt);
+    mysqli_stmt_bind_result($stmt, $service_name);
+    $passwords = array();
+    while (mysqli_stmt_fetch($stmt)) {
+        $passwords[] = array("service_name" => $service_name);
+    }
+    mysqli_stmt_close($stmt);
+    return $passwords;
+}
+
+// Logout-Funktion
+function logout() {
+    session_unset();
+    session_destroy();
+    header("Location: login.php"); // Weiterleitung zur Anmeldeseite
+    exit;
+}
+
+// Verarbeite Formulardaten
+if ($_SERVER["REQUEST_METHOD"] == "POST") {
+    if (isset($_POST['username']) && isset($_POST['password'])) {
+        $username = $_POST['username'];
+        $password = $_POST['password'];
+
+        // Überprüfe die Anmeldeinformationen
+        if (checkLogin($username, $password)) {
+            header("Location: index.php"); // Weiterleitung zur Hauptseite
+            exit;
+        } else {
+            echo "<p>Falscher Benutzername oder Passwort.</p>";
+        }
+    }
+}
+?>
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Password Manager</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <h2>Password Manager</h2>
+        <?php if (isLoggedIn()): ?>
+            <h3>Willkommen, <?= $_SESSION['username'] ?>!</h3>
+            <form action="logout.php" method="post">
+                <button type="submit">Logout</button>
+            </form>
+            <h3>Gespeicherte Passwörter:</h3>
+            <ul>
+                <?php $passwords = getPasswords(); ?>
+                <?php foreach ($passwords as $password): ?>
+                    <li><?= $password['service_name'] ?></li>
+                <?php endforeach; ?>
+            </ul>
+        <?php else: ?>
+            <form action="<?php echo htmlspecialchars($_SERVER["PHP_SELF"]); ?>" method="post">
+                <input type="text" name="username" placeholder="Benutzername" required>
+                <input type="password" name="password" placeholder="Passwort" required>
+                <button type="submit">Login</button>
+            </form>
+            <p>Noch keinen Account? <a href="register.php">Hier registrieren</a>.</p>
+        <?php endif; ?>
+    </div>
+</body>
+</html>
